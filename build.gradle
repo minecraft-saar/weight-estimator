@@ -1,0 +1,62 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'checkstyle'
+    id 'idea'
+    id 'pl.allegro.tech.build.axion-release' version '1.10.1'
+    id 'maven-publish'
+}
+
+group 'de.saar.minecraft'
+description 'weight-estimator'
+
+scmVersion {
+    ignoreUncommittedChanges = false
+    tag {
+        prefix = 'release'
+    }
+}
+version = scmVersion.version
+
+version '1.0'
+
+sourceCompatibility = 1.11
+
+mainClassName = "de.saar.minecraft.analysis.WeightEstimator"
+
+repositories {
+    mavenCentral()
+    maven {url 'https://www.ling.uni-potsdam.de/tcl/maven2/external'}
+    maven {url 'https://www.ling.uni-potsdam.de/tcl/maven2/releases'}
+    maven { url 'https://jitpack.io' }
+    maven {
+        name = "GitHubPackages"
+        url = uri("https://maven.pkg.github.com/minecraft-saar/experiment-analysis")
+        credentials {
+            username = project.findProperty("gpr.user") ?: System.getenv("GPR_USER")
+            password = project.findProperty("gpr.key") ?: System.getenv("GPR_API_KEY")
+        }
+    }
+}
+
+dependencies {
+    
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.13.1'
+
+    // database
+    implementation group: 'org.jooq', name: 'jooq', version: '3.13.0'
+    implementation group: 'org.mariadb.jdbc', name: 'mariadb-java-client', version: '2.6.0'
+
+    implementation 'com.google.code.gson:gson:2.8.6'
+    
+    implementation 'org.apache.commons:commons-math3:3.5'
+
+    implementation 'de.bwaldvogel:liblinear:2.42'
+
+    implementation group: 'de.saar.minecraft.infrastructure', name: 'broker', version: '1.2.1'
+    implementation 'com.github.coli-saar:basics:9b78dde236d924e696671b586d7e6eb09309f253'
+}
+
+checkstyle {
+    toolVersion "8.34"
+}

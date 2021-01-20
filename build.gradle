@@ -1,7 +1,6 @@
 plugins {
     id 'java'
     id 'application'
-    id 'checkstyle'
     id 'idea'
     id 'pl.allegro.tech.build.axion-release' version '1.10.1'
     id 'maven-publish'
@@ -29,14 +28,6 @@ repositories {
     maven {url 'https://www.ling.uni-potsdam.de/tcl/maven2/external'}
     maven {url 'https://www.ling.uni-potsdam.de/tcl/maven2/releases'}
     maven { url 'https://jitpack.io' }
-    maven {
-        name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/minecraft-saar/experiment-analysis")
-        credentials {
-            username = project.findProperty("gpr.user") ?: System.getenv("GPR_USER")
-            password = project.findProperty("gpr.key") ?: System.getenv("GPR_API_KEY")
-        }
-    }
 }
 
 dependencies {
@@ -53,10 +44,6 @@ dependencies {
 
     implementation 'de.bwaldvogel:liblinear:2.42'
 
-    implementation group: 'de.saar.minecraft.infrastructure', name: 'broker', version: '1.2.1'
+    implementation group: 'com.github.minecraft-saar.infrastructure', name: 'broker', version: '42894960f7080bd8ad0d4de7582d422c0a6934b4'
     implementation 'com.github.coli-saar:basics:9b78dde236d924e696671b586d7e6eb09309f253'
-}
-
-checkstyle {
-    toolVersion "8.34"
 }

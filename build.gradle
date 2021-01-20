@@ -17,8 +17,6 @@ scmVersion {
 }
 version = scmVersion.version
 
-version '1.0'
-
 sourceCompatibility = 1.11
 
 mainClassName = "de.saar.minecraft.analysis.WeightEstimator"
@@ -46,4 +44,30 @@ dependencies {
 
     implementation group: 'com.github.minecraft-saar.infrastructure', name: 'broker', version: '42894960f7080bd8ad0d4de7582d422c0a6934b4'
     implementation 'com.github.coli-saar:basics:9b78dde236d924e696671b586d7e6eb09309f253'
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+
+            artifact sourcesJar
+            artifact javadocJar
+        }
+    }
 }

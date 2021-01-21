@@ -26,11 +26,7 @@ import static de.saar.minecraft.broker.db.Tables.GAME_LOGS;
 public class WeightEstimator {
     /*
     TODO:
-    implement bootstraping for weight estimation, use linear regression as the bootstrap function
-    sample from that and return sampled coefficients
-
-    implement block bootstrap
-
+    implement block bootstrap with block == games (maybe?)
      */
 
     public static final String FIRST_INSTRUCTION_FEATURE = "firstinstruction";
@@ -80,6 +76,10 @@ public class WeightEstimator {
         // estimator.sampleDurationCoeffsWithBootstrap(10000);
     }
     
+    public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
+        this(DSL.using(connStr), lowerPercentile, higherPercentile);
+    }
+    
     public WeightEstimator(DSLContext jooq, int lowerPercentile, int higherPercentile) {
         this.jooq = jooq;
         this.lowerPercentile = lowerPercentile;
@@ -115,12 +115,22 @@ public class WeightEstimator {
         return result;
     }
 
+    /**
+     * Extracts timing data from all games in the database and optimizes weights using linear regression.
+     */
     public Map<String, Double> predictDurationCoeffsFromAllGames() {
         var flatData = allData.stream().reduce(new ArrayList<>(), (x, y) -> { x.addAll(y); return x;});
         var coeffs = runLinearRegression(flatData);
         return linearRegressionResultToGrammarDurations(coeffs);
     }
 
+    /**
+     * Runs Bootstrapping for {@code numRuns} iterations on the set of all instructions,
+     * running linear regression on each sample.  We then sample each weight between the {@code lowerPercentile} and
+     * the {@code higherPercentile} of all regression results for that feature.  Sampling is uniform.
+     * @param numRuns humber of runs for bootstrapping
+     * @return A map of feature weights
+     */
     public Map<String, Double> sampleDurationCoeffsWithBootstrap(int numRuns) {
         double[][] bootstrapData = perElementBootstrap(numRuns);
         var bootResult = statisticsFromBootstrap(bootstrapData);
@@ -134,8 +144,12 @@ public class WeightEstimator {
         return result;
     }
 
-
-    public double[][] perElementBootstrap(int numRuns) {
+    /**
+     * Run Bootstrapping for {@code numRuns} iterations. For each sample, run regression on the feature weights.
+     * @return a vector of size{@code [numRuns][numFeatures]} containing all coefficients for every run.
+     * Feature indices are the ones from the feature mapping.
+     */
+    protected double[][] perElementBootstrap(int numRuns) {
         var flatData = allData.stream().reduce(new ArrayList<>(), (x, y) -> { x.addAll(y); return x;});
         int n = flatData.size();
         var random = new Random();
@@ -162,7 +176,11 @@ public class WeightEstimator {
             this.upperbound = new double[numFeatures];
         }
     }
-    
+
+    /**
+     * Computes the mean, lower percentile and upper percentile for each feature present in the {@code bootstrapResult}.
+     * @return A populated {@link BootstrapResult}
+     */
     public BootstrapResult statisticsFromBootstrap(double[][] bootstrapResult) {
         UnivariateStatistic lowerBound = new Percentile(lowerPercentile);
         UnivariateStatistic upperBound = new Percentile(higherPercentile);

@@ -12,8 +12,6 @@ import org.apache.commons.math3.stat.descriptive.rank.Percentile;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -42,21 +40,12 @@ public class WeightEstimator {
     private final DSLContext jooq;
     
     public static void main(String[] args) throws SQLException {
-        var connStr = "jdbc:mariadb://localhost:3306/RANDOMIZEDWEIGHTS";
+        var connStr = "jdbc:mariadb://localhost:3306/RANDOMIZEDWEIGHTS;user=minecraft";
         if (args.length >= 1) {
             connStr = args[0];
         }
-        String connUser = "minecraft";
-        if (args.length >= 2) {
-            connUser = args[1];
-        }
-        String connPwd ="";
-        if (args.length >= 3) {
-            connPwd = args[2];
-        }
-        Connection conn = DriverManager.getConnection(connStr, connUser, connPwd);
 
-        var estimator = new WeightEstimator(DSL.using(conn),25,75);
+        var estimator = new WeightEstimator(connStr,25,75);
         var results = estimator.predictDurationCoeffsFromAllGames();
         System.out.println("global optimum:");
         printWeightMap(results);
@@ -77,11 +66,7 @@ public class WeightEstimator {
     }
     
     public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
-        this(DSL.using(connStr), lowerPercentile, higherPercentile);
-    }
-    
-    public WeightEstimator(DSLContext jooq, int lowerPercentile, int higherPercentile) {
-        this.jooq = jooq;
+        this.jooq = DSL.using(connStr);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
         this.allData = extractAllData();
@@ -326,7 +311,7 @@ public class WeightEstimator {
     }
     
     private static void printWeightMap(Map<String,Double> map) {
-        map.entrySet().stream().sorted(Comparator.comparing(Map.Entry::getKey)).forEach((entry) ->
+        map.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach((entry) ->
                 System.out.println(entry.getKey() + ": " + entry.getValue())
         );
     }

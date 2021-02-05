@@ -6,7 +6,7 @@ plugins {
     id 'maven-publish'
 }
 
-group 'de.saar.minecraft'
+group 'com.github.minecraft-saar'
 description 'weight-estimator'
 
 scmVersion {

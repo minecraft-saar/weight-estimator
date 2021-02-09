@@ -64,7 +64,25 @@ public class WeightEstimator {
         }
         // estimator.sampleDurationCoeffsWithBootstrap(10000);
     }
-    
+
+    /**
+     * Creates an estimator that will sample from bootstrapped coefficients between {@code lowerPercentile} and
+     * {@code higherPercentile}.
+     * @param connStr The jdbc / jooq connection string.  Jooq ignores user and pass info in this string.
+     * @param user The database username
+     * @param pass the database password
+     * @param lowerPercentile coefficients are uniformly drawn from this percentile of the bootstrapped coefficients
+     * @param higherPercentile coefficients are randomly drawn up to this percentile of the bootstrapped coefficients
+     */
+    public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile) {
+        this.jooq = DSL.using(connStr, user, pass);
+        this.lowerPercentile = lowerPercentile;
+        this.higherPercentile = higherPercentile;
+        this.allData = extractAllData();
+        createFeatureMapping(allData);
+    }
+
+
     public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
         this.jooq = DSL.using(connStr);
         this.lowerPercentile = lowerPercentile;

@@ -5,11 +5,14 @@ import de.bwaldvogel.liblinear.*;
 import de.saar.basic.Pair;
 // import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
 
+import de.up.ling.tree.Tree;
+import de.up.ling.tree.TreeVisitor;
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 import org.apache.commons.math3.stat.descriptive.UnivariateStatistic;
 import org.apache.commons.math3.stat.descriptive.moment.Mean;
 import org.apache.commons.math3.stat.descriptive.rank.Percentile;
 import org.jooq.DSLContext;
+import org.jooq.exception.DataAccessException;
 import org.jooq.impl.DSL;
 
 import java.sql.SQLException;
@@ -28,37 +31,82 @@ public class WeightEstimator {
      */
 
     public static final String FIRST_INSTRUCTION_FEATURE = "firstinstruction";
+    
+    protected static final String FIRST_OCCURENCE_PREFIX = "firstoccurence_";
 
     public Map<String, Integer> featureMap;
     public int maxFeatureId;
     
     public final int lowerPercentile;
     public final int higherPercentile;
-    
-    public List<List<Pair<String[], Long>>> allData;
+
+    /**
+     * A list containing timing data for each game. The data for a game is again a list, this
+     * time of (feature array, time) pairs.
+     */
+    public List<List<Pair<List<String>, Long>>> allData;
     
     private final DSLContext jooq;
     
+    public static class WeightResult {
+        public final Map<String, Double> weights;
+        public final Map<String, Double> firstOccurenceWeights;
+
+        public WeightResult(Map<String, Double> allWeights) {
+            this.weights = new HashMap<>();
+            this.firstOccurenceWeights = new HashMap<>();
+            for (var e: allWeights.entrySet()) {
+                if (e.getKey().startsWith(FIRST_OCCURENCE_PREFIX)) {
+                    firstOccurenceWeights.put(e.getKey().substring(FIRST_OCCURENCE_PREFIX.length()), e.getValue());
+                } else {
+                    weights.put(e.getKey(), e.getValue());
+                }
+            }
+        }
+     
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("first occurence weights:\n");
+            firstOccurenceWeights.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach((entry) ->
+                    sb.append(entry.getKey())
+                            .append(": ")
+                            .append(entry.getValue())
+                            .append("\n")
+            );
+            sb.append("weights:\n");
+            weights.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach((entry) ->
+                   sb.append(entry.getKey())
+                           .append(": ")
+                           .append(entry.getValue())
+                           .append("\n")
+            );
+            return sb.toString();
+        }
+    }
+    
     public static void main(String[] args) throws SQLException {
-        var connStr = "jdbc:mariadb://localhost:3306/RANDOMIZEDWEIGHTS;user=minecraft";
+        var connStr = "jdbc:mariadb://localhost:3306/MINECRAFTTEST";
         if (args.length >= 1) {
             connStr = args[0];
         }
 
-        var estimator = new WeightEstimator(connStr,25,75);
+        var estimator = new WeightEstimator(connStr, "minecraft", "", 10,90, new ArrayList<>());
         var results = estimator.predictDurationCoeffsFromAllGames();
         System.out.println("global optimum:");
-        printWeightMap(results);
+        System.out.println(results);
 
         System.out.println("sampled:");
-        ArrayList<Map<String, Double>> res = new ArrayList<>();
+        ArrayList<WeightResult> res = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            res.add(estimator.sampleDurationCoeffsWithBootstrap(1000));
+            res.add(estimator.sampleDurationCoeffsWithBootstrap(1000, true));
         }
         for (var key: estimator.featureMap.keySet()) {
             System.out.print(key + ": ");
             for (int i = 0; i < 10; i++) {
-                System.out.print(res.get(i).get(key) + " ");
+                System.out.println(res.get(i).weights.get(key) + " ");
+                if (res.get(i).firstOccurenceWeights.containsKey(key)) {
+                    System.out.println("first occurence: " + res.get(i).firstOccurenceWeights.get(key) + " ");
+                }
             }
             System.out.println();
         }
@@ -74,27 +122,67 @@ public class WeightEstimator {
      * @param lowerPercentile coefficients are uniformly drawn from this percentile of the bootstrapped coefficients
      * @param higherPercentile coefficients are randomly drawn up to this percentile of the bootstrapped coefficients
      */
-    public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile) {
+    public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
+                           List<List<Tree<String>>> seedGameData) {
         this.jooq = DSL.using(connStr, user, pass);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
-        this.allData = extractAllData();
+        try {
+            this.allData = extractAllData();
+            if (allData.stream().mapToInt((List::size)).sum() == 0) {
+                // there are games but they have no instructions yet
+                // in other parts of the code we just check whether
+                // allData is empty instead of also checking whether each
+                // list is empty, so set allData to the empty list here
+                this.allData = new ArrayList<>();
+            }
+        } catch (DataAccessException e) {
+            this.allData = new ArrayList<>();
+        }
+        addSeedGamesToAllData(seedGameData);
         createFeatureMapping(allData);
     }
 
+    private void addSeedGamesToAllData(List<List<Tree<String>>> games) {
+        long assumedGameTime = 1000*10; // 10 seconds in milliseconds, hopefully faster than real completion times
+        var seedInstructionTimes = new ArrayList<Pair<List<String>, Double>>();
+        for (var game: games) {
+            var gameTimes = new ArrayList<Pair<List<String>, Long>>();
+            int numInstructions = game.size();
+            for (var instruction: game) {
+                ArrayList<String> labels = new ArrayList<>();
+                instruction.dfs(new TreeVisitor<String, Void, Void>() {
+                    @Override
+                    public Void combine(Tree<String> node, List<Void> childrenValues) {
+                        labels.add(node.getLabel());
+                        return null;
+                    }
+                });
+                gameTimes.add(new Pair<>(labels, assumedGameTime / numInstructions));
+            }
+            allData.add(gameTimes);
+        }
+    }
 
-    public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
+ /*   public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
         this.jooq = DSL.using(connStr);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
         this.allData = extractAllData();
         createFeatureMapping(allData);
-    }
+    }*/
 
     /**
      * Runs L2 regression on the data.  Returns a vector of coefficients.
      */
-    public double[] runLinearRegression(List<Pair<String[], Long>> data) {
+    protected double[] runLinearRegression(List<Pair<List<String>, Long>> data) {
+        // for some reason we were asked to solve an empty problem
+        // return a low-ball estimate instead.
+        if (data.isEmpty()) {
+            var result = new double[maxFeatureId];
+            Arrays.fill(result, 0.9);
+            return result;
+        }
         var p = new Problem();
         var pdata = dataToLibLinearFormat(data);
         // p.bias = -1; // this is the default value
@@ -110,7 +198,7 @@ public class WeightEstimator {
     /**
      * Use the feature mapping to create a map that can be used for MinecraftRealizer:SetExpectedDurations.
      */
-    public Map<String, Double> linearRegressionResultToGrammarDurations(double[] coeffs) {
+    protected Map<String, Double> linearRegressionResultToGrammarDurations(double[] coeffs) {
         Map<String, Double> result = new HashMap<>();
         for (var entry: featureMap.entrySet()) {
             result.put(entry.getKey(), coeffs[entry.getValue()-1]);
@@ -121,10 +209,13 @@ public class WeightEstimator {
     /**
      * Extracts timing data from all games in the database and optimizes weights using linear regression.
      */
-    public Map<String, Double> predictDurationCoeffsFromAllGames() {
+    public WeightResult predictDurationCoeffsFromAllGames() {
+        if (allData.isEmpty()) {
+            return new WeightResult(new HashMap<>());
+        }
         var flatData = allData.stream().reduce(new ArrayList<>(), (x, y) -> { x.addAll(y); return x;});
         var coeffs = runLinearRegression(flatData);
-        return linearRegressionResultToGrammarDurations(coeffs);
+        return new WeightResult(linearRegressionResultToGrammarDurations(coeffs));
     }
 
     /**
@@ -134,8 +225,16 @@ public class WeightEstimator {
      * @param numRuns humber of runs for bootstrapping
      * @return A map of feature weights
      */
-    public Map<String, Double> sampleDurationCoeffsWithBootstrap(int numRuns) {
-        double[][] bootstrapData = perElementBootstrap(numRuns);
+    public WeightResult sampleDurationCoeffsWithBootstrap(int numRuns, boolean samplePerGame) {
+        if (allData.isEmpty()) {
+            return new WeightResult(new HashMap<>());
+        }
+        double[][] bootstrapData;
+        if (samplePerGame) {
+            bootstrapData = perGameBootstrap(numRuns);
+        } else {
+            bootstrapData = perInstructionBootstrap(numRuns);
+        }
         var bootResult = statisticsFromBootstrap(bootstrapData);
         var r = new Random();
         var result = new HashMap<String, Double>();
@@ -144,22 +243,44 @@ public class WeightEstimator {
             double to =  bootResult.upperbound[entry.getValue() - 1];
             result.put(entry.getKey(), r.nextDouble()*(to-from) + from);
         }
-        return result;
+        return new WeightResult(result);
     }
 
+    /**
+     * Bootstrapping with game-based sampling, i.e. one draw adds all instructions of one random
+     * game into the sample for which we run linear regression.
+     * Other than the different sampling, it does the same as {@link #perInstructionBootstrap(int)}
+     * @param numRuns number of runs for bootstrapping
+     * @return A map of feature weights
+     */
+    protected double[][] perGameBootstrap(int numRuns) {
+        int n = allData.size();
+        var random = new Random();
+        random.setSeed(1L);
+        var results = new double[numRuns][];
+        for (int run = 0; run < numRuns; run++) {
+            var sample = new ArrayList<Pair<List<String>, Long>>();
+            for (int i = 0; i < n; i++) {
+                sample.addAll(allData.get(random.nextInt(n)));
+            }
+            results[run] = runLinearRegression(sample);
+        }
+        return results;
+    }
+    
     /**
      * Run Bootstrapping for {@code numRuns} iterations. For each sample, run regression on the feature weights.
      * @return a vector of size{@code [numRuns][numFeatures]} containing all coefficients for every run.
      * Feature indices are the ones from the feature mapping.
      */
-    protected double[][] perElementBootstrap(int numRuns) {
+    protected double[][] perInstructionBootstrap(int numRuns) {
         var flatData = allData.stream().reduce(new ArrayList<>(), (x, y) -> { x.addAll(y); return x;});
         int n = flatData.size();
         var random = new Random();
         random.setSeed(1L);
         var results = new double[numRuns][];
         for (int run = 0; run < numRuns; run++) {
-            var sample = new ArrayList<Pair<String[], Long>>();
+            var sample = new ArrayList<Pair<List<String>, Long>>();
             for (int i = 0; i < n; i++) {
                 sample.add(flatData.get(random.nextInt(n)));
             }
@@ -184,7 +305,7 @@ public class WeightEstimator {
      * Computes the mean, lower percentile and upper percentile for each feature present in the {@code bootstrapResult}.
      * @return A populated {@link BootstrapResult}
      */
-    public BootstrapResult statisticsFromBootstrap(double[][] bootstrapResult) {
+    protected BootstrapResult statisticsFromBootstrap(double[][] bootstrapResult) {
         UnivariateStatistic lowerBound = new Percentile(lowerPercentile);
         UnivariateStatistic upperBound = new Percentile(higherPercentile);
         UnivariateStatistic mean = new Mean();
@@ -216,8 +337,12 @@ public class WeightEstimator {
         }
         return result;
     }
-    
-    private List<List<Pair<String[], Long>>> extractAllData() {
+
+    /**
+     * Extracts timing data from the database.
+     * @return A list of games, each being a list of timings.
+     */
+    private List<List<Pair<List<String>, Long>>> extractAllData() {
         return jooq.select(GAMES.ID)
                 .from(GAMES)
                 .fetch(GAMES.ID)
@@ -226,7 +351,7 @@ public class WeightEstimator {
                 .collect(Collectors.toList());
     }
     
-    private List<Pair<String[], Long>> extractDataFromGame(int gameId) {
+    private List<Pair<List<String>, Long>> extractDataFromGame(int gameId) {
         var instructionTimes = jooq.selectFrom(GAME_LOGS)
                 .where(GAME_LOGS.GAMEID.eq(gameId))
                 .and(GAME_LOGS.MESSAGE_TYPE.eq("TextMessage"))
@@ -242,9 +367,11 @@ public class WeightEstimator {
                 .map((x) -> new Pair<>(JsonParser.parseString(x.left).getAsJsonObject(), x.right))
                 .collect(Collectors.toList());
 
-        List<Pair<String[], Long>> result = new ArrayList<>();
+        List<Pair<List<String>, Long>> result = new ArrayList<>();
         
-        String[] lastInstruction = null;
+        Set<String> seenIndefiniteObjects = new HashSet<>();
+        
+        List<String> lastInstruction = null;
         LocalDateTime lastTime = null;
         
         for (var instructionTime: instructionTimes) {
@@ -254,15 +381,32 @@ public class WeightEstimator {
             }
             String instructionTree = json.get("tree").getAsString();
             if (instructionTree.equals("NULL")) {
+                String message = json.get("message").getAsString();
+                if (message.startsWith("Now I will teach you how to build a ")) {
+                    // the user now knows this concept through teaching
+                    seenIndefiniteObjects.add(message.substring("Now I will teach you how to build a ".length()));
+                }
                 // this is an instruction such as "now I will teach you how to build a wall"
                 continue;
             }
-            var currInstruction = instructionTree.split("[(),]+");
+            List<String> nonProductiveTerminalSymbols = List.of("dnp", "np", "obj", "loc");
+            ArrayList<String> currInstruction = Arrays.stream(instructionTree.split("[(),]+"))
+                    .filter((x) -> !nonProductiveTerminalSymbols.contains(x))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            // currInstruction;
+            // Arrays.stream(currInstruction).filter((x) -> true).toArray()
+            // mark all indefinite objects we have not yet seen
+            for (int i = 0; i < currInstruction.size(); i++) {
+                String f = currInstruction.get(i);
+                if (f.startsWith("i") && ! seenIndefiniteObjects.contains(f)) {
+                    seenIndefiniteObjects.add(f);
+                    currInstruction.set(i, FIRST_OCCURENCE_PREFIX + f);
+                }
+            }
             if (lastTime == null) { // first instruction
                 lastTime = instructionTime.right;
-                lastInstruction = new String[currInstruction.length + 1];
-                System.arraycopy(currInstruction, 0, lastInstruction, 0, currInstruction.length);
-                lastInstruction[currInstruction.length] = FIRST_INSTRUCTION_FEATURE;
+                lastInstruction = currInstruction;
+                lastInstruction.add(FIRST_INSTRUCTION_FEATURE);
                 continue;
             }
             result.add(new Pair<>(lastInstruction, lastTime.until(instructionTime.right, ChronoUnit.MILLIS)));
@@ -282,11 +426,10 @@ public class WeightEstimator {
         return result;
     }
 
-
     /**
      * initializes the feature mapping from the given games.
      */
-    private void createFeatureMapping(Collection<List<Pair<String[], Long>>> data) {
+    private void createFeatureMapping(Collection<List<Pair<List<String>, Long>>> data) {
         Map<String, Integer> result = new HashMap<>();
         int currentId = 1;
         for (var game: data) {
@@ -306,7 +449,7 @@ public class WeightEstimator {
      * Converts a list of String[], Long pairs from our data model to a X,Y representation usable
      * by liblinear.
      */
-    private Pair<Feature[][], double[]> dataToLibLinearFormat(List<Pair<String[], Long>> data) {
+    private Pair<Feature[][], double[]> dataToLibLinearFormat(List<Pair<List<String>, Long>> data) {
         var x = new Feature[data.size()][];
         var y = new double[data.size()];
         int index = 0;
@@ -326,11 +469,5 @@ public class WeightEstimator {
             index++;
         }
         return new Pair<>(x,y);
-    }
-    
-    private static void printWeightMap(Map<String,Double> map) {
-        map.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach((entry) ->
-                System.out.println(entry.getKey() + ": " + entry.getValue())
-        );
     }
 }

@@ -164,14 +164,6 @@ public class WeightEstimator {
         }
     }
 
- /*   public WeightEstimator(String connStr, int lowerPercentile, int higherPercentile) {
-        this.jooq = DSL.using(connStr);
-        this.lowerPercentile = lowerPercentile;
-        this.higherPercentile = higherPercentile;
-        this.allData = extractAllData();
-        createFeatureMapping(allData);
-    }*/
-
     /**
      * Runs L2 regression on the data.  Returns a vector of coefficients.
      */
@@ -348,6 +340,10 @@ public class WeightEstimator {
                 .fetch(GAMES.ID)
                 .stream()
                 .map(this::extractDataFromGame)
+                // some games have no instructions, especially the one just started,
+                // which is nonetheless already recorded in the DB with no instructions so far.
+                // remove them so we cannot create a bootstrap without instructions.
+                .filter((x) -> ! x.isEmpty())
                 .collect(Collectors.toList());
     }
     

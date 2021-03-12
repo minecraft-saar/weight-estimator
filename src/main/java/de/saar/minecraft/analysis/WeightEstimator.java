@@ -3,7 +3,6 @@ package de.saar.minecraft.analysis;
 import com.google.gson.JsonParser;
 import de.bwaldvogel.liblinear.*;
 import de.saar.basic.Pair;
-// import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
 
 import de.up.ling.tree.Tree;
 import de.up.ling.tree.TreeVisitor;
@@ -11,6 +10,8 @@ import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 import org.apache.commons.math3.stat.descriptive.UnivariateStatistic;
 import org.apache.commons.math3.stat.descriptive.moment.Mean;
 import org.apache.commons.math3.stat.descriptive.rank.Percentile;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jooq.DSLContext;
 import org.jooq.exception.DataAccessException;
 import org.jooq.impl.DSL;
@@ -25,10 +26,7 @@ import static de.saar.minecraft.broker.db.Tables.GAMES;
 import static de.saar.minecraft.broker.db.Tables.GAME_LOGS;
 
 public class WeightEstimator {
-    /*
-    TODO:
-    implement block bootstrap with block == games (maybe?)
-     */
+    private static final Logger logger = LogManager.getLogger(WeightEstimator.class);
 
     public static final String FIRST_INSTRUCTION_FEATURE = "firstinstruction";
     
@@ -124,11 +122,30 @@ public class WeightEstimator {
      */
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
                            List<List<Tree<String>>> seedGameData) {
+        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, "");
+    }
+
+    /**
+     * Creates an estimator that will sample from bootstrapped coefficients between {@code lowerPercentile} and
+     * {@code higherPercentile}.
+     * @param connStr The jdbc / jooq connection string.  Jooq ignores user and pass info in this string.
+     * @param user The database username
+     * @param pass the database password
+     * @param lowerPercentile coefficients are uniformly drawn from this percentile of the bootstrapped coefficients
+     * @param higherPercentile coefficients are randomly drawn up to this percentile of the bootstrapped coefficients
+     * @param architect only use games played with this architect. if empty, use all games
+     */
+    public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
+                           List<List<Tree<String>>> seedGameData, String architect) {
         this.jooq = DSL.using(connStr, user, pass);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
         try {
-            this.allData = extractAllData();
+            if (architect.equals("")) {
+                this.allData = extractAllData();
+            } else {
+                this.allData = extractDataForArchitect(architect);
+            }
             if (allData.stream().mapToInt((List::size)).sum() == 0) {
                 // there are games but they have no instructions yet
                 // in other parts of the code we just check whether
@@ -139,6 +156,8 @@ public class WeightEstimator {
         } catch (DataAccessException e) {
             this.allData = new ArrayList<>();
         }
+        logger.info("initialized with " + allData.size() + " games plus " + seedGameData.size() + " seed games" +
+                " for architect " + architect);
         addSeedGamesToAllData(seedGameData);
         createFeatureMapping(allData);
     }
@@ -183,6 +202,7 @@ public class WeightEstimator {
         p.l = pdata.left.length;
         p.n = maxFeatureId;
         Parameter params = new Parameter(SolverType.L2R_L2LOSS_SVR, 500, 0.01);
+        Linear.disableDebugOutput();
         Model m = Linear.train(p, params);
         return m.getFeatureWeights();
     }
@@ -317,19 +337,37 @@ public class WeightEstimator {
             result.lowerbound[feature] = lowerBound.evaluate(dataArray);
             result.upperbound[feature] = upperBound.evaluate(dataArray);
 
-            System.out.println("==========================================");
+            logger.debug("==========================================");
             for (var x: featureMap.entrySet()) {
                 if (feature == x.getValue() - 1) {
-                    System.out.println(x.getKey());
+                    logger.debug(x.getKey());
                 }
             }
-            System.out.println("mean: " + mean.evaluate(dataArray));
-            System.out.println(lowerPercentile + "%: " + lowerBound.evaluate(dataArray));
-            System.out.println(higherPercentile + "%: " + upperBound.evaluate(dataArray));
+            logger.debug("mean: " + mean.evaluate(dataArray));
+            logger.debug(lowerPercentile + "%: " + lowerBound.evaluate(dataArray));
+            logger.debug(higherPercentile + "%: " + upperBound.evaluate(dataArray));
         }
         return result;
     }
 
+    /**
+     * Extracts timing data from the database that were played with a specific architect.
+     * @return A list of games, each being a list of timings.
+     */
+    private List<List<Pair<List<String>, Long>>> extractDataForArchitect(String architect) {
+        return jooq.select(GAMES.ID)
+                .from(GAMES)
+                .where(GAMES.ARCHITECT_INFO.eq(architect))
+                .fetch(GAMES.ID)
+                .stream()
+                .map(this::extractDataFromGame)
+                // some games have no instructions, especially the one just started,
+                // which is nonetheless already recorded in the DB with no instructions so far.
+                // remove them so we cannot create a bootstrap without instructions.
+                .filter((x) -> ! x.isEmpty())
+                .collect(Collectors.toList());
+    }
+    
     /**
      * Extracts timing data from the database.
      * @return A list of games, each being a list of timings.

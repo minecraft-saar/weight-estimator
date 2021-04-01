@@ -62,6 +62,24 @@ public class WeightEstimator {
             }
         }
      
+        private String weightMapToString(Map<String, Double> map) {
+            return map.entrySet()
+                    .stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .map((entry) -> "\"" + entry.getKey() + "\": " + + entry.getValue())
+                    .collect(Collectors.joining(",\n"));
+        }
+        
+        public String toJson() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("{ \"firstOccurenceWeights\": [\n");
+            sb.append(weightMapToString(firstOccurenceWeights));
+            sb.append("\n],\n\"weights\": [\n");
+            sb.append(weightMapToString(weights));
+            sb.append("\n]}");
+            return sb.toString();
+        }
+        
         public String toString() {
             StringBuilder sb = new StringBuilder();
             sb.append("first occurence weights:\n");

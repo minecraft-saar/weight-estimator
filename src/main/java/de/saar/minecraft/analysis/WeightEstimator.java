@@ -393,6 +393,8 @@ public class WeightEstimator {
                             .getAsString();
                     return new Pair<>(text, x.getTimestamp());
                 })
+                // ignore everything after the end of the experiment
+                .takeWhile((x) -> ! x.getLeft().contains("Thank you for participating in our experiment"))
                 .filter((x) -> x.left.startsWith("{"))
                 .map((x) -> new Pair<>(JsonParser.parseString(x.left).getAsJsonObject(), x.right))
                 .collect(Collectors.toList());

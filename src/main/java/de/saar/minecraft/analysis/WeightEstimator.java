@@ -22,8 +22,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import picocli.CommandLine;
+
 import static de.saar.minecraft.broker.db.Tables.GAMES;
 import static de.saar.minecraft.broker.db.Tables.GAME_LOGS;
+
 
 public class WeightEstimator {
     private static final Logger logger = LogManager.getLogger(WeightEstimator.class);
@@ -99,34 +102,9 @@ public class WeightEstimator {
             return sb.toString();
         }
     }
-    
+
     public static void main(String[] args) throws SQLException {
-        var connStr = "jdbc:mariadb://localhost:3306/MINECRAFTTEST";
-        if (args.length >= 1) {
-            connStr = args[0];
-        }
-
-        var estimator = new WeightEstimator(connStr, "minecraft", "", 10,90, new ArrayList<>());
-        var results = estimator.predictDurationCoeffsFromAllGames();
-        System.out.println("global optimum:");
-        System.out.println(results);
-
-        System.out.println("sampled:");
-        ArrayList<WeightResult> res = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            res.add(estimator.sampleDurationCoeffsWithBootstrap(1000, true));
-        }
-        for (var key: estimator.featureMap.keySet()) {
-            System.out.print(key + ": ");
-            for (int i = 0; i < 10; i++) {
-                System.out.println(res.get(i).weights.get(key) + " ");
-                if (res.get(i).firstOccurenceWeights.containsKey(key)) {
-                    System.out.println("first occurence: " + res.get(i).firstOccurenceWeights.get(key) + " ");
-                }
-            }
-            System.out.println();
-        }
-        // estimator.sampleDurationCoeffsWithBootstrap(10000);
+        new CommandLine(new WeightEstimatorCLI()).execute(args);
     }
 
     /**

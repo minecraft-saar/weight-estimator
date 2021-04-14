@@ -41,6 +41,7 @@ dependencies {
     implementation 'org.apache.commons:commons-math3:3.5'
 
     implementation 'de.bwaldvogel:liblinear:2.42'
+    implementation 'info.picocli:picocli:4.6.1'
 
     implementation group: 'com.github.minecraft-saar.infrastructure', name: 'broker', version: '42894960f7080bd8ad0d4de7582d422c0a6934b4'
     implementation 'com.github.coli-saar:basics:9b78dde236d924e696671b586d7e6eb09309f253'

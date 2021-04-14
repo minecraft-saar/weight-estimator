@@ -1,5 +1,6 @@
 package de.saar.minecraft.analysis;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import de.bwaldvogel.liblinear.*;
 import de.saar.basic.Pair;
@@ -64,6 +65,11 @@ public class WeightEstimator {
                 }
             }
         }
+        
+        public static WeightResult fromJson(String jsonString) {
+            Gson gson = new Gson();
+            return gson.fromJson(jsonString, WeightResult.class);
+        }
      
         private String weightMapToString(Map<String, Double> map) {
             return map.entrySet()
@@ -75,11 +81,11 @@ public class WeightEstimator {
         
         public String toJson() {
             StringBuilder sb = new StringBuilder();
-            sb.append("{ \"firstOccurenceWeights\": [\n");
+            sb.append("{ \"firstOccurenceWeights\": {\n");
             sb.append(weightMapToString(firstOccurenceWeights));
-            sb.append("\n],\n\"weights\": [\n");
+            sb.append("\n},\n\"weights\": {\n");
             sb.append(weightMapToString(weights));
-            sb.append("\n]}");
+            sb.append("\n}}");
             return sb.toString();
         }
         

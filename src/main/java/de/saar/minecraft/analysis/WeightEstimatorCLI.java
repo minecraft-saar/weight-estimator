@@ -25,7 +25,7 @@ public class WeightEstimatorCLI implements Callable<Integer> {
     int upperPercentile = 90;
 
     @CommandLine.Option(names = "--mode",
-            description = "OPTIMAL (default): LR on all data; BOOTSTRAPPED: sample from bootstrapped LRs, BOTH: both")
+            description = "OPTIMAL: LR on all data; BOOTSTRAPPED: sample from bootstrapped LRs, BOTH: both (default)")
     EstimationMode mode = EstimationMode.BOTH;
 
     @CommandLine.Option(names = "--architect",

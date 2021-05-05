@@ -1,6 +1,7 @@
 package de.saar.minecraft.analysis;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import de.bwaldvogel.liblinear.*;
 import de.saar.basic.Pair;
@@ -109,7 +110,7 @@ public class WeightEstimator {
         }
     }
 
-    public static void main(String[] args) throws SQLException {
+    public static void main(String[] args) {
         new CommandLine(new WeightEstimatorCLI()).execute(args);
     }
 
@@ -166,7 +167,6 @@ public class WeightEstimator {
 
     private void addSeedGamesToAllData(List<List<Tree<String>>> games) {
         long assumedGameTime = 1000*10; // 10 seconds in milliseconds, hopefully faster than real completion times
-        var seedInstructionTimes = new ArrayList<Pair<List<String>, Double>>();
         for (var game: games) {
             var gameTimes = new ArrayList<Pair<List<String>, Long>>();
             int numInstructions = game.size();
@@ -388,31 +388,54 @@ public class WeightEstimator {
     }
     
     private List<Pair<List<String>, Long>> extractDataFromGame(int gameId) {
-        var instructionTimes = jooq.selectFrom(GAME_LOGS)
+        var log = jooq.selectFrom(GAME_LOGS)
                 .where(GAME_LOGS.GAMEID.eq(gameId))
-                .and(GAME_LOGS.MESSAGE_TYPE.eq("TextMessage"))
-                .stream()
-                .map((x) -> {
-                    var text = JsonParser.parseString(x.getMessage())
-                            .getAsJsonObject()
-                            .get("text")
-                            .getAsString();
-                    return new Pair<>(text, x.getTimestamp());
-                })
-                // ignore everything after the end of the experiment
-                .takeWhile((x) -> ! x.getLeft().contains("Thank you for participating in our experiment"))
-                .filter((x) -> x.left.startsWith("{"))
-                .map((x) -> new Pair<>(JsonParser.parseString(x.left).getAsJsonObject(), x.right))
-                .collect(Collectors.toList());
+                .and(
+                        GAME_LOGS.MESSAGE_TYPE.eq("TextMessage")
+                                .or(GAME_LOGS.MESSAGE_TYPE.eq("CurrentObject"))
+                )
+                .fetch();
+        List<Pair<String, Pair<JsonObject, LocalDateTime>>> instructionTimes = new ArrayList<>();
+        String currentObject = "";
+        for (var elem: log) {
+            String message = elem.get(GAME_LOGS.MESSAGE);
+            String type = elem.get(GAME_LOGS.MESSAGE_TYPE);
+            if (message.contains("Thank you for participating in our experiment")) {
+                break; // end of game
+            }
+            if (type.equals("CurrentObject")) {
+                currentObject = message;
+                for (int i =0; i< instructionTimes.size(); i++) {
+                    var candidate = instructionTimes.get(i);
+                    if (candidate.left.equals(currentObject)) {
+                        instructionTimes = instructionTimes.subList(0, i+1);
+                        break;
+                    }
+                }
+                continue;
+            }
+            // Message type: TextMessage
+            var text = JsonParser.parseString(elem.getMessage())
+                    .getAsJsonObject()
+                    .get("text")
+                    .getAsString();
+            if (! text.startsWith("{")) {
+                continue;
+            }
+            var jsonObject = JsonParser.parseString(text).getAsJsonObject();
+            instructionTimes.add(new Pair<>(currentObject, new Pair<>(jsonObject, elem.getTimestamp())));
+        }
 
-        List<Pair<List<String>, Long>> result = new ArrayList<>();
         
         Set<String> seenIndefiniteObjects = new HashSet<>();
         
         List<String> lastInstruction = null;
         LocalDateTime lastTime = null;
         
-        for (var instructionTime: instructionTimes) {
+        List<Pair<List<String>, Long>> result = new ArrayList<>();
+        
+        for (var objectInstructionTime: instructionTimes) {
+            var instructionTime = objectInstructionTime.right;
             var json = instructionTime.left;
             if (! (json.has("new") && json.get("new").getAsBoolean())) {
                 continue;

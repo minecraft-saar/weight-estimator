@@ -136,7 +136,8 @@ public class WeightEstimator {
      * @param pass the database password
      * @param lowerPercentile coefficients are uniformly drawn from this percentile of the bootstrapped coefficients
      * @param higherPercentile coefficients are randomly drawn up to this percentile of the bootstrapped coefficients
-     * @param architect only use games played with this architect. if empty, use all games
+     * @param architect only use games played with this architect. if empty, use all games. Can use % and _ to match
+     *                  architects using SQL LIKE.
      */
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
                            List<List<Tree<String>>> seedGameData, String architect) {
@@ -260,6 +261,25 @@ public class WeightEstimator {
         return new WeightResult(result);
     }
 
+    public WeightResult getUCBWithBootstrap(int numRuns, boolean samplePerGame) {
+        if (allData.isEmpty()) {
+            return new WeightResult(new HashMap<>());
+        }
+        double[][] bootstrapData;
+        if (samplePerGame) {
+            bootstrapData = perGameBootstrap(numRuns);
+        } else {
+            bootstrapData = perInstructionBootstrap(numRuns);
+        }
+        var bootResult = statisticsFromBootstrap(bootstrapData);
+        var result = new HashMap<String, Double>();
+        for (var entry: featureMap.entrySet()) {
+            double from = bootResult.lowerbound[entry.getValue() - 1];
+            result.put(entry.getKey(), from);
+        }
+        return new WeightResult(result);
+    }
+    
     /**
      * Bootstrapping with game-based sampling, i.e. one draw adds all instructions of one random
      * game into the sample for which we run linear regression.
@@ -353,13 +373,16 @@ public class WeightEstimator {
     }
 
     /**
-     * Extracts timing data from the database that were played with a specific architect.
+     * Extracts timing data from the database that were played with an architect
+     * matching the supplied architectMatch. architectMatch is matched against the
+     * architect names using SQL LIKE, i.e. "foo" matches only "foo" while "foo%"
+     * also matches games played with an architect called "foobar".
      * @return A list of games, each being a list of timings.
      */
-    private List<List<Pair<List<String>, Long>>> extractDataForArchitect(String architect) {
+    private List<List<Pair<List<String>, Long>>> extractDataForArchitect(String architectMatch) {
         return jooq.select(GAMES.ID)
                 .from(GAMES)
-                .where(GAMES.ARCHITECT_INFO.eq(architect))
+                .where(GAMES.ARCHITECT_INFO.like(architectMatch))
                 .fetch(GAMES.ID)
                 .stream()
                 .map(this::extractDataFromGame)

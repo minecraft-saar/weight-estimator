@@ -31,7 +31,12 @@ public class WeightEstimatorCLI implements Callable<Integer> {
     @CommandLine.Option(names = "--architect",
             description = "Restrict to architect with this name. Leave empty for no restriction.")
     String architectName = "";
-    
+
+    @CommandLine.Option(names = "--scenario",
+            description = "Restrict to scenario with this name. Leave empty for no restriction.")
+    String scenarioName = "";
+
+
     @CommandLine.Option(names = "--sample-individual-instructions",
             description = "Bootstrap sampling on the instruction level instead of the game level")
     boolean sampleIndividualInstructions;
@@ -42,7 +47,8 @@ public class WeightEstimatorCLI implements Callable<Integer> {
         var estimator = new WeightEstimator(connStr, dbUser, dbPass,
                 lowerPercentile,upperPercentile,
                 new ArrayList<>(), // seed games not used in the CLI
-                architectName );
+                architectName,
+                scenarioName);
         
         if (mode == EstimationMode.OPTIMAL || mode == EstimationMode.BOTH) {
             var results = estimator.predictDurationCoeffsFromAllGames();

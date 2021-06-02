@@ -18,7 +18,6 @@ import org.jooq.DSLContext;
 import org.jooq.exception.DataAccessException;
 import org.jooq.impl.DSL;
 
-import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -128,6 +127,10 @@ public class WeightEstimator {
         this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, "");
     }
 
+    public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
+                           List<List<Tree<String>>> seedGameData, String architect) {
+        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, architect, "%");
+    }
     /**
      * Creates an estimator that will sample from bootstrapped coefficients between {@code lowerPercentile} and
      * {@code higherPercentile}.
@@ -140,16 +143,19 @@ public class WeightEstimator {
      *                  architects using SQL LIKE.
      */
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
-                           List<List<Tree<String>>> seedGameData, String architect) {
+                           List<List<Tree<String>>> seedGameData, String architect, String scenario) {
         this.jooq = DSL.using(connStr, user, pass);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
+        if (architect.equals("")) {
+            architect = "%";
+        }
+        if (scenario.equals("")) {
+            // match everything
+            scenario = "%";
+        }
         try {
-            if (architect.equals("")) {
-                this.allData = extractAllData();
-            } else {
-                this.allData = extractDataForArchitect(architect);
-            }
+            this.allData = extractData(architect, scenario);
             if (allData.stream().mapToInt((List::size)).sum() == 0) {
                 // there are games but they have no instructions yet
                 // in other parts of the code we just check whether
@@ -379,10 +385,11 @@ public class WeightEstimator {
      * also matches games played with an architect called "foobar".
      * @return A list of games, each being a list of timings.
      */
-    private List<List<Pair<List<String>, Long>>> extractDataForArchitect(String architectMatch) {
+    private List<List<Pair<List<String>, Long>>> extractData(String architectMatch, String scenarioMatch) {
         return jooq.select(GAMES.ID)
                 .from(GAMES)
                 .where(GAMES.ARCHITECT_INFO.like(architectMatch))
+                .and(GAMES.SCENARIO.like(scenarioMatch))
                 .fetch(GAMES.ID)
                 .stream()
                 .map(this::extractDataFromGame)

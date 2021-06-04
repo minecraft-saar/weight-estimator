@@ -561,4 +561,36 @@ public class WeightEstimator {
         }
         return new Pair<>(x,y);
     }
+    
+    public void evaluateModelFit() {
+        List<Pair<Long, Long>> result = new ArrayList<>();
+        var model = predictDurationCoeffsFromAllGames();
+        for (var game: allData) {
+            boolean start_of_game = true;
+            for (var instruction: game) {
+                var features = instruction.left;
+                var duration = instruction.right;
+                long prediction = 0;
+                if (start_of_game) {
+                    prediction += model.weights.get(FIRST_INSTRUCTION_FEATURE);
+                    start_of_game = false;
+                }
+                for (var f: features) {
+                    if (f.startsWith(WeightEstimator.FIRST_OCCURENCE_PREFIX)) {
+                        prediction += model.firstOccurenceWeights.get(f.substring(FIRST_OCCURENCE_PREFIX.length()));
+                    } else {
+                        prediction += model.weights.get(f);
+                    }
+                }
+                result.add(new Pair<>(duration, prediction));
+            }
+        }
+
+        System.out.println("Average actual duration: " + result.stream().collect(Collectors.averagingLong(x->x.left)));
+        System.out.println("Average predicted duration: " + result.stream().collect(Collectors.averagingLong(x->x.right)));
+
+        System.out.println("Average absolute error: " +
+                result.stream().collect(Collectors.averagingLong(x-> Math.abs(x.left - x.right))));
+    }
+    
 }

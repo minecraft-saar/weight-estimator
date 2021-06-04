@@ -36,6 +36,8 @@ public class WeightEstimatorCLI implements Callable<Integer> {
             description = "Restrict to scenario with this name. Leave empty for no restriction.")
     String scenarioName = "";
 
+    @CommandLine.Option(names = "--eval", description = "Print fit characteristics (wrt to training data)")
+    boolean eval;
 
     @CommandLine.Option(names = "--sample-individual-instructions",
             description = "Bootstrap sampling on the instruction level instead of the game level")
@@ -61,6 +63,10 @@ public class WeightEstimatorCLI implements Callable<Integer> {
             var results = estimator.sampleDurationCoeffsWithBootstrap(1000,
                     !sampleIndividualInstructions);
             System.out.println(results.toJson());
+        }
+        if (eval) {
+            System.out.println("Model fit on all selected data:");
+            estimator.evaluateModelFit();
         }
         return 0;
     }

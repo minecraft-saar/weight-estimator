@@ -606,11 +606,20 @@ public class WeightEstimator {
             }
         }
 
-        System.out.println("Average actual duration: " + result.stream().collect(Collectors.averagingLong(x->x.left)));
-        System.out.println("Average predicted duration: " + result.stream().collect(Collectors.averagingLong(x->x.right)));
-
+        double sample_average = result.stream().collect(Collectors.averagingLong(x->x.left));
+        double predction_average = result.stream().collect(Collectors.averagingLong(x->x.right));
+        double sample_variance = result.stream().collect(Collectors.averagingDouble(
+                (x) -> Math.pow(x.left - sample_average, 2)));
+        double mean_squared_residuals = result.stream().collect(Collectors.averagingDouble(
+                (x) -> Math.pow(x.left - x.right, 2)));
+        
+        System.out.println("Average actual duration: " + sample_average);
+        System.out.println("Average predicted duration: " + predction_average);
         System.out.println("Average absolute error: " +
                 result.stream().collect(Collectors.averagingLong(x-> Math.abs(x.left - x.right))));
+        System.out.println("Sample variance: " + sample_variance);
+        System.out.println("Mean squared residuals: " + mean_squared_residuals);
+        System.out.println("R squared: " +  (1 - (mean_squared_residuals / sample_variance)));
     }
     
 }

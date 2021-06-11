@@ -487,12 +487,8 @@ public class WeightEstimator {
                 // this is an instruction such as "now I will teach you how to build a wall"
                 continue;
             }
-            List<String> nonProductiveTerminalSymbols = List.of("dnp", "np", "obj", "loc");
             ArrayList<String> currInstruction = Arrays.stream(instructionTree.split("[(),]+"))
-                    .filter((x) -> !nonProductiveTerminalSymbols.contains(x))
                     .collect(Collectors.toCollection(ArrayList::new));
-            // currInstruction;
-            // Arrays.stream(currInstruction).filter((x) -> true).toArray()
             // mark all indefinite objects we have not yet seen
             boolean newInstructionFound = false;
             for (int i = 0; i < currInstruction.size(); i++) {

@@ -42,6 +42,13 @@ public class WeightEstimator {
     public final int lowerPercentile;
     public final int higherPercentile;
 
+    /** This is a debug feature: set to true, every tree is treated as *one* feature
+        i.e. we learn one weight per instruction and have no weight sharing between
+        instructions via features.  Obviously does not generalize at all.  Used to
+        get an intuition for the amount of noise in the data that we cannot remove
+        by better features / modeling. */
+    public boolean singleFeaturePerGame = false;
+
     /**
      * A list containing timing data for each game. The data for a game is again a list, this
      * time of (feature array, time) pairs.
@@ -475,7 +482,7 @@ public class WeightEstimator {
                 String message = json.get("message").getAsString();
                 if (message.startsWith("Now I will teach you how to build a ")) {
                     // the user now knows this concept through teaching
-                    seenIndefiniteObjects.add(message.substring("Now I will teach you how to build a ".length()));
+                    seenIndefiniteObjects.add("i" + message.substring("Now I will teach you how to build a ".length()));
                 }
                 // this is an instruction such as "now I will teach you how to build a wall"
                 continue;
@@ -487,13 +494,26 @@ public class WeightEstimator {
             // currInstruction;
             // Arrays.stream(currInstruction).filter((x) -> true).toArray()
             // mark all indefinite objects we have not yet seen
+            boolean newInstructionFound = false;
             for (int i = 0; i < currInstruction.size(); i++) {
                 String f = currInstruction.get(i);
                 if (f.startsWith("i") && ! seenIndefiniteObjects.contains(f)) {
                     seenIndefiniteObjects.add(f);
                     currInstruction.set(i, FIRST_OCCURENCE_PREFIX + f);
+                    newInstructionFound = true;
                 }
             }
+            
+            if (singleFeaturePerGame) {
+                ArrayList<String> tmp = new ArrayList<>();
+                if (newInstructionFound) {
+                    tmp.add(instructionTree + "FIRSTINSTRUCTION");
+                } else {
+                    tmp.add(instructionTree);
+                }
+                currInstruction = tmp;
+            }
+            
             if (lastTime == null) { // first instruction
                 lastTime = instructionTime.right;
                 lastInstruction = currInstruction;

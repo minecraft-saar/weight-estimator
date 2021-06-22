@@ -33,7 +33,7 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.13.1'
 
     // database
-    implementation group: 'org.jooq', name: 'jooq', version: '3.13.0'
+    implementation group: 'org.jooq', name: 'jooq', version: '3.14.11'
     implementation group: 'org.mariadb.jdbc', name: 'mariadb-java-client', version: '2.6.0'
 
     implementation 'com.google.code.gson:gson:2.8.6'

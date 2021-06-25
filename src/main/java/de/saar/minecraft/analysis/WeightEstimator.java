@@ -443,7 +443,7 @@ public class WeightEstimator {
     }
 
     private List<Pair<List<String>, Long>> extractDataFromGame(int gameId) {
-        return extractDataFromGame(gameId, false);
+        return extractDataFromGame(gameId, deletionsAsCost);
     }
         /**
          * Extracts (instruction, cost) tuples from a specific game.  The cost is either

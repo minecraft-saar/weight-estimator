@@ -49,6 +49,8 @@ public class WeightEstimator {
         by better features / modeling. */
     public boolean singleFeaturePerGame = false;
 
+    public final boolean deletionsAsCost;
+    
     /**
      * A list containing timing data for each game. The data for a game is again a list, this
      * time of (feature array, time) pairs.
@@ -130,13 +132,13 @@ public class WeightEstimator {
      * @param higherPercentile coefficients are randomly drawn up to this percentile of the bootstrapped coefficients
      */
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
-                           List<List<Tree<String>>> seedGameData) {
-        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, "");
+                           List<List<Tree<String>>> seedGameData, boolean deletionsAsCost) {
+        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, "", deletionsAsCost);
     }
 
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
-                           List<List<Tree<String>>> seedGameData, String architect) {
-        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, architect, "%");
+                           List<List<Tree<String>>> seedGameData, String architect, boolean deletionsAsCost) {
+        this(connStr, user, pass, lowerPercentile, higherPercentile, seedGameData, architect, "%", deletionsAsCost);
     }
     /**
      * Creates an estimator that will sample from bootstrapped coefficients between {@code lowerPercentile} and
@@ -150,10 +152,11 @@ public class WeightEstimator {
      *                  architects using SQL LIKE.
      */
     public WeightEstimator(String connStr, String user, String pass, int lowerPercentile, int higherPercentile,
-                           List<List<Tree<String>>> seedGameData, String architect, String scenario) {
+                           List<List<Tree<String>>> seedGameData, String architect, String scenario, boolean deletionsAsCost) {
         this.jooq = DSL.using(connStr, user, pass);
         this.lowerPercentile = lowerPercentile;
         this.higherPercentile = higherPercentile;
+        this.deletionsAsCost = deletionsAsCost;
         if (architect.equals("")) {
             architect = "%";
         }
@@ -423,32 +426,102 @@ public class WeightEstimator {
                 .filter((x) -> ! x.isEmpty())
                 .collect(Collectors.toList());
     }
-    
+
+    private record InstructionMetaData(JsonObject object,
+                                       JsonObject json,
+                                       LocalDateTime tstamp,
+                                       int deletionsUpToNow) {}
+
+    /**
+     * converts a string to a comparable json object, i.e. it removes the "blocks left" property
+     * that can change over time.
+     */
+    private JsonObject objectStringToGeneralObject(String obj) {
+        var res = JsonParser.parseString(obj).getAsJsonObject();
+        res.remove("blocks");
+        return res;
+    }
+
     private List<Pair<List<String>, Long>> extractDataFromGame(int gameId) {
+        return extractDataFromGame(gameId, false);
+    }
+        /**
+         * Extracts (instruction, cost) tuples from a specific game.  The cost is either
+         * the time it took to complete an instruction or the number of errors for that instruction.
+         * @param gameId the ID of the game
+         * @return List of (instruction, cost) pairs.
+         */
+    private List<Pair<List<String>, Long>> extractDataFromGame(int gameId, boolean costIsNumErrors) {
+        /*
+        This code is a bit involved.  We want a list of instructions we chose to give, but the actual log
+        also contains correction instructions, e.g. when a block was deleted and needs to be instructed.
+        The log contains three types of information:
+         - text messages are the instructions we give to the user.
+         - current object is the object we consider.  It appears before the instruction.
+         - block destruction messages are counted because we might want to use this as our cost metric.
+
+         In a first step, we record each instruction and at which time it was started and how many deletions
+         occured up to that point.  In the second step, we calculate the differences between times (or deletions)
+         to obtain the cost of each instruction.
+         */
         var log = jooq.selectFrom(GAME_LOGS)
                 .where(GAME_LOGS.GAMEID.eq(gameId))
                 .and(
                         GAME_LOGS.MESSAGE_TYPE.eq("TextMessage")
                                 .or(GAME_LOGS.MESSAGE_TYPE.eq("CurrentObject"))
+                                .or(GAME_LOGS.MESSAGE_TYPE.eq("BlockDestroyedMessage"))
                 )
                 .fetch();
-        List<Pair<String, Pair<JsonObject, LocalDateTime>>> instructionTimes = new ArrayList<>();
-        String currentObject = "";
+        List<InstructionMetaData> instructionTimes = new ArrayList<>();
+        JsonObject currentObject = null;
+        int deletionsUpToNow = 0;
+        /*
+        first step
+         */
         for (var elem: log) {
+            if (elem.getMessageType().equals("BlockDestroyedMessage")) {
+                deletionsUpToNow += 1;
+                continue;
+            }
             String message = elem.get(GAME_LOGS.MESSAGE);
             String type = elem.get(GAME_LOGS.MESSAGE_TYPE);
+            if (message.contains("You finished building a")) {
+                // this is meta-instruction we can completely ignore; the relevant meta-instruction
+                // we use is the start teaching instruction instead to note when a new concept is introduced.
+                continue;
+            }
             if (message.contains("Thank you for participating in our experiment")) {
                 break; // end of game
             }
             if (type.equals("CurrentObject")) {
-                currentObject = message;
-                for (int i =0; i< instructionTimes.size(); i++) {
-                    var candidate = instructionTimes.get(i);
-                    if (candidate.left.equals(currentObject)) {
-                        instructionTimes = instructionTimes.subList(0, i+1);
-                        break;
+                currentObject = objectStringToGeneralObject(message);
+                /* the following loop checks whether we revisit an old object to be instructed.
+                   this happens when a block is deleted and has to be instructed.  We want
+                   to count the initial instruction (e.g. "build a railing"), the correction instruction,
+                   and finishing the instruction all as part of the initial instruction.  Therefore,
+                   if we find the new currentObject in the list of objects, we turn back to the state
+                   before that object was first introduced.
+                   As only high-level objects can be continued, we skip this for blocks.
+                 */
+                String currentType = currentObject.get("type").getAsString();
+                if (! currentType.equals("Block")) {
+                    for (int i = 0; i < instructionTimes.size(); i++) {
+                        if (instructionTimes.get(i).object == null) {
+                            continue;
+                        }
+                        var candidateObject = instructionTimes.get(i).object;
+                        if (candidateObject.equals(currentObject)) {
+                            instructionTimes = new ArrayList<>(instructionTimes.subList(0, i + 1));
+                            break;
+                        }
                     }
                 }
+                continue;
+            }
+            JsonObject finalCurrentObject = currentObject;
+            if (instructionTimes.stream().anyMatch((x) -> x.object!= null && x.object.equals(finalCurrentObject))) {
+                // We already started tracking this element and do not want to add a second item
+                // for it into our list.  This happens when we go back to a high-level instruction (see above)
                 continue;
             }
             // Message type: TextMessage
@@ -460,23 +533,30 @@ public class WeightEstimator {
                 continue;
             }
             var jsonObject = JsonParser.parseString(text).getAsJsonObject();
-            instructionTimes.add(new Pair<>(currentObject, new Pair<>(jsonObject, elem.getTimestamp())));
-        }
-
-        
-        Set<String> seenIndefiniteObjects = new HashSet<>();
-        
-        List<String> lastInstruction = null;
-        LocalDateTime lastTime = null;
-        
-        List<Pair<List<String>, Long>> result = new ArrayList<>();
-        
-        for (var objectInstructionTime: instructionTimes) {
-            var instructionTime = objectInstructionTime.right;
-            var json = instructionTime.left;
-            if (! (json.has("new") && json.get("new").getAsBoolean())) {
+            if (! (jsonObject.has("new") && jsonObject.get("new").getAsBoolean())) {
+                // this is a repetition of a previous instruction; no need to store it
                 continue;
             }
+            if (text.contains("I will teach you how")) {
+                // this is a meta instruction where we do not actually instruct a specific object, so
+                // we save null as the object.
+                instructionTimes.add(new InstructionMetaData(null, jsonObject, elem.getTimestamp(), deletionsUpToNow));
+            } else {
+                instructionTimes.add(new InstructionMetaData(currentObject, jsonObject, elem.getTimestamp(), deletionsUpToNow));
+            }
+        }
+
+        /*
+        second step
+         */
+        Set<String> seenIndefiniteObjects = new HashSet<>();
+        List<String> lastInstruction = null;
+        LocalDateTime lastTime = null;
+        int lastNumDeletions = 0;
+        List<Pair<List<String>, Long>> result = new ArrayList<>();
+
+        for (var metaData: instructionTimes) {
+            var json = metaData.json;
             String instructionTree = json.get("tree").getAsString();
             if (instructionTree.equals("NULL")) {
                 String message = json.get("message").getAsString();
@@ -511,14 +591,21 @@ public class WeightEstimator {
             }
             
             if (lastTime == null) { // first instruction
-                lastTime = instructionTime.right;
+                lastTime = metaData.tstamp;
                 lastInstruction = currInstruction;
                 lastInstruction.add(FIRST_INSTRUCTION_FEATURE);
                 continue;
             }
-            result.add(new Pair<>(lastInstruction, lastTime.until(instructionTime.right, ChronoUnit.MILLIS)));
+            long cost;
+            if (costIsNumErrors) {
+                cost = metaData.deletionsUpToNow - lastNumDeletions;
+            } else {
+                cost = lastTime.until(metaData.tstamp, ChronoUnit.MILLIS);
+            }
+            result.add(new Pair<>(lastInstruction, cost));
             lastInstruction = currInstruction;
-            lastTime = instructionTime.right;
+            lastTime = metaData.tstamp;
+            lastNumDeletions = metaData.deletionsUpToNow;
         }
 
         var successTimeR = jooq.select(GAME_LOGS.TIMESTAMP)
@@ -528,7 +615,11 @@ public class WeightEstimator {
                 .fetchOne();
         
         if (successTimeR != null && lastTime != null) {
-            result.add(new Pair<>(lastInstruction, lastTime.until(successTimeR.component1(), ChronoUnit.MILLIS)));
+            if (costIsNumErrors) {
+                result.add(new Pair<>(lastInstruction, (long)(deletionsUpToNow - lastNumDeletions)));
+            } else {
+                result.add(new Pair<>(lastInstruction, lastTime.until(successTimeR.component1(), ChronoUnit.MILLIS)));
+            }
         }
         return result;
     }

@@ -39,6 +39,10 @@ public class WeightEstimatorCLI implements Callable<Integer> {
     @CommandLine.Option(names = "--eval", description = "Print fit characteristics (wrt to training data)")
     boolean eval;
 
+    @CommandLine.Option(names = "--deletionsAsCosts",
+            description = "Use number of block deletions as cost instead of completion time")
+    boolean deletionsAsCosts;
+
     @CommandLine.Option(names = "--sample-individual-instructions",
             description = "Bootstrap sampling on the instruction level instead of the game level")
     boolean sampleIndividualInstructions;
@@ -50,7 +54,8 @@ public class WeightEstimatorCLI implements Callable<Integer> {
                 lowerPercentile,upperPercentile,
                 new ArrayList<>(), // seed games not used in the CLI
                 architectName,
-                scenarioName);
+                scenarioName,
+                deletionsAsCosts);
         
         if (mode == EstimationMode.OPTIMAL || mode == EstimationMode.BOTH) {
             var results = estimator.predictDurationCoeffsFromAllGames();

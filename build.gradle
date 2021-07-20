@@ -46,7 +46,12 @@ dependencies {
     implementation 'de.bwaldvogel:liblinear:2.42'
     implementation 'info.picocli:picocli:4.6.1'
 
-    implementation group: 'com.github.minecraft-saar.infrastructure', name: 'broker', version: 'release-1.2.3'
+    implementation group: 'com.github.minecraft-saar.infrastructure', name: 'broker', version: 'release-1.2.3', {
+        // we only need the database classes from infrastructure.
+        // Prevent the shared-resources from being propagated to dependencies
+        // so that this transitive dependency version does not overwrite the other version.
+        exclude group: 'com.github.minecraft-saar', module: 'shared-resources'
+    }
     implementation 'com.github.coli-saar:basics:9b78dde236d924e696671b586d7e6eb09309f253'
 }
 
